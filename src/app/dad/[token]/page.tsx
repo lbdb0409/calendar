@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { getSupabase } from "@/lib/supabase";
 import { entryHours, formatHours, formatMoney, weekRange } from "@/lib/time";
-import type { Entry, Payment } from "@/lib/types";
-import { format, isWithinInterval, parseISO, startOfWeek, subWeeks } from "date-fns";
+import type { Entry, Payment, UniBlock } from "@/lib/types";
+import { addDays, format, isWithinInterval, parseISO, startOfDay, startOfWeek, subWeeks } from "date-fns";
 
 export const dynamic = "force-dynamic";
 
@@ -34,9 +34,10 @@ export default async function DadPage({ params }: Props) {
     notFound();
   }
 
-  const [entriesRes, paymentsRes] = await Promise.all([
+  const [entriesRes, paymentsRes, uniRes] = await Promise.all([
     sb.from("entries").select("*").order("date", { ascending: false }),
     sb.from("payments").select("*").order("date", { ascending: false }),
+    sb.from("uni_blocks").select("*"),
   ]);
 
   const all: Entry[] = (entriesRes.data ?? []).map((row) => ({
@@ -56,6 +57,27 @@ export default async function DadPage({ params }: Props) {
     note: row.note ?? undefined,
     createdAt: row.created_at,
   }));
+
+  const uniBlocks: UniBlock[] = (uniRes.data ?? []).map((row) => ({
+    id: row.id,
+    date: row.date,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    label: row.label ?? undefined,
+  }));
+
+  // Upcoming: planned work + uni in the next 14 days (incl. today).
+  const today = startOfDay(new Date());
+  const horizon = addDays(today, 14);
+  const upcomingEntries = all.filter((e) => {
+    if (e.status !== "planned") return false;
+    const d = parseISO(e.date);
+    return d >= today && d <= horizon;
+  });
+  const upcomingUni = uniBlocks.filter((u) => {
+    const d = parseISO(u.date);
+    return d >= today && d <= horizon;
+  });
 
   const totalEarned = all
     .filter((e) => e.status === "logged")
@@ -131,6 +153,14 @@ export default async function DadPage({ params }: Props) {
         </div>
       </section>
 
+      <section className="card mt-4">
+        <h2 className="text-lg font-semibold">Upcoming schedule</h2>
+        <p className="mt-0.5 text-sm text-[color:var(--color-muted)]">
+          Next 14 days — when {settings.my_name ?? "they"} plans to work, and when uni is on.
+        </p>
+        <UpcomingSchedule entries={upcomingEntries} uni={upcomingUni} rate={Number(settings.hourly_rate)} />
+      </section>
+
       {payments.length > 0 && (
         <section className="card mt-4">
           <h2 className="text-lg font-semibold">Payments</h2>
@@ -171,6 +201,101 @@ export default async function DadPage({ params }: Props) {
       </p>
     </div>
   );
+}
+
+function UpcomingSchedule({
+  entries,
+  uni,
+  rate,
+}: {
+  entries: Entry[];
+  uni: UniBlock[];
+  rate: number;
+}) {
+  // Merge entries + uni into one set of dates.
+  const dates = new Set<string>();
+  for (const e of entries) dates.add(e.date);
+  for (const u of uni) dates.add(u.date);
+
+  if (dates.size === 0) {
+    return (
+      <p className="mt-3 text-sm text-[color:var(--color-muted)]">
+        Nothing planned in the next 14 days yet.
+      </p>
+    );
+  }
+
+  const sorted = Array.from(dates).sort();
+  const totalPlannedHours = entries.reduce(
+    (s, e) => s + (timeMin(e.endTime) - timeMin(e.startTime)) / 60,
+    0,
+  );
+
+  return (
+    <div className="mt-3">
+      {totalPlannedHours > 0 && (
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-[color:var(--color-accent-soft)] px-3 py-1 text-xs text-[color:var(--color-accent)]">
+          <strong>{formatHours(totalPlannedHours)}</strong> of work planned ·{" "}
+          <strong>{formatMoney(totalPlannedHours * rate)}</strong>
+        </div>
+      )}
+      <ul className="space-y-3">
+        {sorted.map((date) => {
+          const dayEntries = entries
+            .filter((e) => e.date === date)
+            .sort((a, b) => a.startTime.localeCompare(b.startTime));
+          const dayUni = uni
+            .filter((u) => u.date === date)
+            .sort((a, b) => a.startTime.localeCompare(b.startTime));
+          const workHours = dayEntries.reduce(
+            (s, e) => s + (timeMin(e.endTime) - timeMin(e.startTime)) / 60,
+            0,
+          );
+          return (
+            <li key={date} className="rounded-lg border border-[color:var(--color-line)] bg-white p-3">
+              <div className="flex items-baseline justify-between">
+                <div className="font-medium">{format(parseISO(date), "EEEE d MMM")}</div>
+                <div className="flex items-center gap-2 text-sm">
+                  {dayUni.length > 0 && <span className="pill pill-uni">uni</span>}
+                  {workHours > 0 && (
+                    <span className="tabular-nums text-[color:var(--color-ink-2)]">
+                      {formatHours(workHours)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <ul className="mt-2 space-y-1">
+                {dayUni.map((u) => (
+                  <li key={u.id} className="flex items-baseline justify-between text-sm">
+                    <span className="text-[color:var(--color-uni)]">
+                      <span className="tabular-nums">{u.startTime}–{u.endTime}</span>
+                      <span className="ml-2">{u.label ?? "Uni"}</span>
+                    </span>
+                  </li>
+                ))}
+                {dayEntries.map((e) => (
+                  <li key={e.id} className="flex items-baseline justify-between text-sm">
+                    <span className="text-[color:var(--color-ink-2)]">
+                      <span className="tabular-nums">{e.startTime}–{e.endTime}</span>
+                      {e.notes && <span className="ml-2 text-[color:var(--color-muted)]">{e.notes}</span>}
+                    </span>
+                    <span className="tabular-nums text-[color:var(--color-muted)]">
+                      {formatHours((timeMin(e.endTime) - timeMin(e.startTime)) / 60)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function timeMin(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
 }
 
 function DayGroupedList({
