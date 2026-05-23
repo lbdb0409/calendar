@@ -3,6 +3,7 @@ import { getSupabase } from "@/lib/supabase";
 import { entryHours, formatHours, formatMoney, weekRange } from "@/lib/time";
 import type { Entry, Payment, UniBlock } from "@/lib/types";
 import { addDays, format, isWithinInterval, parseISO, startOfDay, startOfWeek, subWeeks } from "date-fns";
+import { DadCalendar } from "@/components/DadCalendar";
 
 export const dynamic = "force-dynamic";
 
@@ -154,9 +155,19 @@ export default async function DadPage({ params }: Props) {
       </section>
 
       <section className="card mt-4">
-        <h2 className="text-lg font-semibold">Upcoming schedule</h2>
+        <h2 className="text-lg font-semibold">Calendar</h2>
         <p className="mt-0.5 text-sm text-[color:var(--color-muted)]">
-          Next 14 days — when {settings.my_name ?? "they"} plans to work, and when uni is on.
+          Browse any month. Tap a day to see what's planned, done, or uni.
+        </p>
+        <div className="mt-4">
+          <DadCalendar entries={all} uniBlocks={uniBlocks} />
+        </div>
+      </section>
+
+      <section className="card mt-4">
+        <h2 className="text-lg font-semibold">Next 14 days</h2>
+        <p className="mt-0.5 text-sm text-[color:var(--color-muted)]">
+          Quick digest of what {settings.my_name ?? "they"} has planned soon.
         </p>
         <UpcomingSchedule entries={upcomingEntries} uni={upcomingUni} rate={Number(settings.hourly_rate)} />
       </section>
