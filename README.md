@@ -52,14 +52,13 @@ In **Settings**, click **Copy dad's link**. It looks like
 3. In the project's Vercel settings → Environment Variables, add:
    - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `RESEND_API_KEY`, `SUMMARY_FROM_EMAIL` (optional)
-   - `SITE_USERNAME`, `SITE_PASSWORD` ← protects `/me` from randos
 4. Redeploy. You'll get a free `something.vercel.app` URL — pick an obscure
    project name so it isn't guessable.
 
 ## Who can see what
 
-- `/me`, `/me/schedule`, `/me/settings`, `/api/*` — gated by HTTP basic auth
-  using `SITE_USERNAME`/`SITE_PASSWORD`. In local dev (no env vars) auth is
-  skipped automatically.
+- `/me`, `/me/schedule`, `/me/settings`, `/api/*` — open URLs. Anyone who finds
+  the deployed URL can see and edit your timesheet, so keep the Vercel project
+  name obscure.
 - `/dad/<token>` — open URL. The 32-char token is randomly generated and
   acts as the soft secret. Don't paste the URL anywhere public.
