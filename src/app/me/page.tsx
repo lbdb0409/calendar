@@ -3,13 +3,25 @@
 import { useMemo } from "react";
 import { PageHeader } from "@/components/Shell";
 import { WeekProgress } from "@/components/WeekProgress";
+import { TimerCard } from "@/components/TimerCard";
+import { BalanceCard } from "@/components/BalanceCard";
 import { TodayCard } from "@/components/TodayCard";
 import { SendSummaryButton } from "@/components/SendSummaryButton";
 import { useStoreContext } from "@/lib/store";
 import { entriesForWeek, totalHours } from "@/lib/time";
 
 export default function LogPage() {
-  const { state, loaded, addEntry, updateEntry, removeEntry } = useStoreContext();
+  const {
+    state,
+    loaded,
+    addEntry,
+    updateEntry,
+    removeEntry,
+    addPayment,
+    removePayment,
+    startTimer,
+    stopTimer,
+  } = useStoreContext();
 
   const week = useMemo(() => entriesForWeek(state.entries), [state.entries]);
   const hoursDone = totalHours(week, "logged");
@@ -30,16 +42,31 @@ export default function LogPage() {
     <>
       <PageHeader
         title={greeting}
-        subtitle="Log each block of work as you finish it. The notes go straight to dad."
+        subtitle="Use the timer when you sit down, or log a block manually. Notes go to dad."
         right={<SendSummaryButton entries={state.entries} settings={state.settings} />}
       />
 
       <div className="space-y-6">
+        <TimerCard
+          timer={state.timer}
+          onStart={startTimer}
+          onStop={stopTimer}
+          onLog={addEntry}
+        />
+
         <WeekProgress
           done={hoursDone}
           planned={hoursPlanned}
           target={state.settings.weeklyTarget}
           rate={state.settings.hourlyRate}
+        />
+
+        <BalanceCard
+          entries={state.entries}
+          payments={state.payments}
+          hourlyRate={state.settings.hourlyRate}
+          onAdd={addPayment}
+          onRemove={removePayment}
         />
 
         <TodayCard

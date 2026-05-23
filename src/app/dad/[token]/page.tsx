@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getSupabase } from "@/lib/supabase";
 import { entryHours, formatHours, formatMoney, weekRange } from "@/lib/time";
-import type { Entry } from "@/lib/types";
+import type { Entry, Payment } from "@/lib/types";
 import { format, isWithinInterval, parseISO, startOfWeek, subWeeks } from "date-fns";
 
 export const dynamic = "force-dynamic";
@@ -34,12 +34,12 @@ export default async function DadPage({ params }: Props) {
     notFound();
   }
 
-  const { data: entries } = await sb
-    .from("entries")
-    .select("*")
-    .order("date", { ascending: false });
+  const [entriesRes, paymentsRes] = await Promise.all([
+    sb.from("entries").select("*").order("date", { ascending: false }),
+    sb.from("payments").select("*").order("date", { ascending: false }),
+  ]);
 
-  const all: Entry[] = (entries ?? []).map((row) => ({
+  const all: Entry[] = (entriesRes.data ?? []).map((row) => ({
     id: row.id,
     date: row.date,
     startTime: row.start_time,
@@ -48,6 +48,20 @@ export default async function DadPage({ params }: Props) {
     status: row.status,
     createdAt: row.created_at,
   }));
+
+  const payments: Payment[] = (paymentsRes.data ?? []).map((row) => ({
+    id: row.id,
+    date: row.date,
+    amount: Number(row.amount),
+    note: row.note ?? undefined,
+    createdAt: row.created_at,
+  }));
+
+  const totalEarned = all
+    .filter((e) => e.status === "logged")
+    .reduce((s, e) => s + entryHours(e), 0) * Number(settings.hourly_rate);
+  const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
+  const outstanding = totalEarned - totalPaid;
 
   const { start, end } = weekRange();
   const thisWeek = all.filter((e) => {
@@ -83,6 +97,23 @@ export default async function DadPage({ params }: Props) {
       </header>
 
       <section className="card">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <BalanceStat label="Total earned" value={formatMoney(totalEarned)} />
+          <BalanceStat label="Paid" value={`–${formatMoney(totalPaid)}`} muted />
+          <BalanceStat
+            label="Outstanding"
+            value={formatMoney(outstanding)}
+            tone={outstanding > 0 ? "accent" : outstanding < 0 ? "warn" : "neutral"}
+          />
+        </div>
+        {outstanding < 0 && (
+          <p className="mt-3 text-xs text-[color:var(--color-warn)]">
+            You've overpaid by {formatMoney(-outstanding)}.
+          </p>
+        )}
+      </section>
+
+      <section className="card mt-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <WeekStat
             label={`This week (from ${format(start, "EEE d MMM")})`}
@@ -99,6 +130,23 @@ export default async function DadPage({ params }: Props) {
           />
         </div>
       </section>
+
+      {payments.length > 0 && (
+        <section className="card mt-4">
+          <h2 className="text-lg font-semibold">Payments</h2>
+          <ul className="mt-3 divide-y divide-[color:var(--color-line)]">
+            {payments.slice(0, 12).map((p) => (
+              <li key={p.id} className="flex items-center justify-between py-2 text-sm">
+                <div>
+                  <div className="font-medium">{format(parseISO(p.date), "EEE d MMM yyyy")}</div>
+                  {p.note && <div className="text-[color:var(--color-muted)]">{p.note}</div>}
+                </div>
+                <div className="display tabular-nums">{formatMoney(p.amount)}</div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="card mt-4">
         <h2 className="text-lg font-semibold">This week's entries</h2>
@@ -182,6 +230,32 @@ function DayGroupedList({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function BalanceStat({
+  label,
+  value,
+  muted,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  tone?: "neutral" | "accent" | "warn";
+}) {
+  const cls = muted
+    ? "text-[color:var(--color-muted)]"
+    : tone === "accent"
+    ? "text-[color:var(--color-accent)]"
+    : tone === "warn"
+    ? "text-[color:var(--color-warn)]"
+    : "text-[color:var(--color-ink)]";
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider text-[color:var(--color-muted)]">{label}</div>
+      <div className={`display mt-1 text-3xl tabular-nums ${cls}`}>{value}</div>
     </div>
   );
 }

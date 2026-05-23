@@ -60,6 +60,18 @@ $$;
 
 create index if not exists uni_blocks_date_idx on uni_blocks (date);
 
+create table if not exists payments (
+  id          uuid primary key default gen_random_uuid(),
+  date        date not null,
+  amount      numeric not null,
+  note        text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists payments_date_idx on payments (date);
+alter table payments enable row level security;
+drop policy if exists "open payments" on payments;
+create policy "open payments" on payments for all using (true) with check (true);
+
 -- Open read/write for anon. Replace with stricter policies if you add auth.
 alter table settings    enable row level security;
 alter table entries     enable row level security;

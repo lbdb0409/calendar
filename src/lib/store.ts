@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, createElement, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import type { AppState, Entry, Settings, UniBlock } from "./types";
+import type { ActiveTimer, AppState, Entry, Payment, Settings, UniBlock } from "./types";
 import { getSupabase } from "./supabase";
 
 const STORAGE_KEY = "hours-for-dad:v1";
@@ -15,7 +15,7 @@ function defaultSettings(): Settings {
 }
 
 function emptyState(): AppState {
-  return { settings: defaultSettings(), entries: [], uniBlocks: [] };
+  return { settings: defaultSettings(), entries: [], uniBlocks: [], payments: [], timer: null };
 }
 
 function readLocal(): AppState {
@@ -28,6 +28,8 @@ function readLocal(): AppState {
       settings: { ...defaultSettings(), ...(parsed.settings ?? {}) },
       entries: parsed.entries ?? [],
       uniBlocks: parsed.uniBlocks ?? [],
+      payments: parsed.payments ?? [],
+      timer: parsed.timer ?? null,
     };
   } catch {
     return emptyState();
@@ -45,17 +47,19 @@ async function cloudLoad(): Promise<AppState | null> {
   const sb = getSupabase();
   if (!sb) return null;
 
-  const [settingsRes, entriesRes, uniRes] = await Promise.all([
+  const [settingsRes, entriesRes, uniRes, paymentsRes] = await Promise.all([
     sb.from("settings").select("*").eq("id", 1).single(),
     sb.from("entries").select("*").order("date", { ascending: false }),
     sb.from("uni_blocks").select("*"),
+    sb.from("payments").select("*").order("date", { ascending: false }),
   ]);
 
-  if (settingsRes.error || entriesRes.error || uniRes.error) {
+  if (settingsRes.error || entriesRes.error || uniRes.error || paymentsRes.error) {
     console.warn("Supabase load failed; using local data", {
       settings: settingsRes.error,
       entries: entriesRes.error,
       uni: uniRes.error,
+      payments: paymentsRes.error,
     });
     return null;
   }
@@ -86,6 +90,14 @@ async function cloudLoad(): Promise<AppState | null> {
       endTime: row.end_time,
       label: row.label ?? undefined,
     })),
+    payments: (paymentsRes.data ?? []).map((row): Payment => ({
+      id: row.id,
+      date: row.date,
+      amount: Number(row.amount),
+      note: row.note ?? undefined,
+      createdAt: row.created_at,
+    })),
+    timer: null, // timer is device-local only
   };
 }
 
@@ -142,6 +154,24 @@ async function cloudDeleteUni(id: string) {
   await sb.from("uni_blocks").delete().eq("id", id);
 }
 
+async function cloudUpsertPayment(p: Payment) {
+  const sb = getSupabase();
+  if (!sb) return;
+  await sb.from("payments").upsert({
+    id: p.id,
+    date: p.date,
+    amount: p.amount,
+    note: p.note ?? null,
+    created_at: p.createdAt,
+  });
+}
+
+async function cloudDeletePayment(id: string) {
+  const sb = getSupabase();
+  if (!sb) return;
+  await sb.from("payments").delete().eq("id", id);
+}
+
 // ---------- React hook ----------
 
 export type Store = ReturnType<typeof useStore>;
@@ -163,16 +193,19 @@ export function useStore() {
         if (
           fromCloud.entries.length === 0 &&
           fromCloud.uniBlocks.length === 0 &&
-          (local.entries.length > 0 || local.uniBlocks.length > 0)
+          fromCloud.payments.length === 0 &&
+          (local.entries.length > 0 || local.uniBlocks.length > 0 || local.payments.length > 0)
         ) {
           await Promise.all([
             cloudUpsertSettings(local.settings),
             ...local.entries.map(cloudUpsertEntry),
             ...local.uniBlocks.map(cloudUpsertUni),
+            ...local.payments.map(cloudUpsertPayment),
           ]);
-          setState(local);
+          setState({ ...local, timer: local.timer });
         } else {
-          setState(fromCloud);
+          // Cloud data wins, but device-local timer always wins for itself.
+          setState({ ...fromCloud, timer: local.timer });
         }
         setCloud(true);
       } else {
@@ -235,6 +268,33 @@ export function useStore() {
     cloudDeleteUni(id);
   }, []);
 
+  const addPayment = useCallback((p: Omit<Payment, "id" | "createdAt">) => {
+    const full: Payment = {
+      ...p,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    };
+    setState((s) => ({ ...s, payments: [full, ...s.payments] }));
+    cloudUpsertPayment(full);
+    return full;
+  }, []);
+
+  const removePayment = useCallback((id: string) => {
+    setState((s) => ({ ...s, payments: s.payments.filter((p) => p.id !== id) }));
+    cloudDeletePayment(id);
+  }, []);
+
+  const startTimer = useCallback(() => {
+    setState((s) => {
+      if (s.timer) return s; // already running
+      return { ...s, timer: { startedAt: new Date().toISOString() } };
+    });
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    setState((s) => ({ ...s, timer: null }));
+  }, []);
+
   return {
     state,
     loaded,
@@ -245,6 +305,10 @@ export function useStore() {
     removeEntry,
     addUni,
     removeUni,
+    addPayment,
+    removePayment,
+    startTimer,
+    stopTimer,
   };
 }
 

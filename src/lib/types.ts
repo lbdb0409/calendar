@@ -27,8 +27,22 @@ export type Settings = {
   shareToken: string;
 };
 
+export type Payment = {
+  id: string;
+  date: string;       // YYYY-MM-DD
+  amount: number;     // AUD
+  note?: string;
+  createdAt: string;
+};
+
+export type ActiveTimer = {
+  startedAt: string;  // ISO timestamp
+};
+
 export type AppState = {
   settings: Settings;
   entries: Entry[];
   uniBlocks: UniBlock[];
+  payments: Payment[];
+  timer: ActiveTimer | null;
 };
