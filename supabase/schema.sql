@@ -6,7 +6,7 @@ create extension if not exists "pgcrypto";
 
 create table if not exists settings (
   id            int primary key default 1,
-  hourly_rate   numeric not null default 40,
+  hourly_rate   numeric not null default 50,
   weekly_target numeric not null default 25,
   dad_email     text,
   dad_name      text,

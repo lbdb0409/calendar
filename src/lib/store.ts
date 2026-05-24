@@ -8,7 +8,7 @@ const STORAGE_KEY = "hours-for-dad:v1";
 
 function defaultSettings(): Settings {
   return {
-    hourlyRate: 40,
+    hourlyRate: 50,
     weeklyTarget: 25,
     shareToken: crypto.randomUUID().replace(/-/g, "").slice(0, 24),
   };
