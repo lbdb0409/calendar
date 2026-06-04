@@ -32,15 +32,16 @@ export function TimerCard({
     onStop();
   }
 
-  function handleLog(notes: string) {
+  function handleLog(payload: { startTime: string; endTime: string; notes: string }) {
     if (!showModal) return;
+    // Anchor the entry to the day the timer started — that's what feels right
+    // even when the actual end time was tweaked.
     const start = new Date(showModal.startedAt);
-    const end = new Date(showModal.endedAt);
     onLog({
       date: todayISO(start),
-      startTime: roundedTime(start),
-      endTime: roundedTime(end),
-      notes: notes.trim() || undefined,
+      startTime: payload.startTime,
+      endTime: payload.endTime,
+      notes: payload.notes.trim() || undefined,
       status: "logged",
     });
     setShowModal(null);
@@ -108,23 +109,31 @@ function StopModal({
 }: {
   startedAt: string;
   endedAt: string;
-  onLog: (notes: string) => void;
+  onLog: (payload: { startTime: string; endTime: string; notes: string }) => void;
   onDiscard: () => void;
 }) {
+  const initialStart = new Date(startedAt);
+  const initialEnd = new Date(endedAt);
+
+  const [startStr, setStartStr] = useState(toHHMM(initialStart));
+  const [endStr, setEndStr] = useState(toHHMM(initialEnd));
   const [notes, setNotes] = useState("");
-  const start = new Date(startedAt);
-  const end = new Date(endedAt);
-  const elapsedHours = (end.getTime() - start.getTime()) / 1000 / 3600;
+
+  const elapsedHours = diffHours(startStr, endStr);
+  const valid = elapsedHours > 0;
+  const adjusted = startStr !== toHHMM(initialStart) || endStr !== toHHMM(initialEnd);
 
   // Close on Escape, log on Cmd/Ctrl+Enter.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onDiscard();
-      if ((e.key === "Enter") && (e.metaKey || e.ctrlKey)) onLog(notes);
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && valid) {
+        onLog({ startTime: startStr, endTime: endStr, notes });
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [notes, onDiscard, onLog]);
+  }, [startStr, endStr, notes, valid, onDiscard, onLog]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
@@ -132,10 +141,57 @@ function StopModal({
         <div className="text-xs uppercase tracking-wider text-[color:var(--color-muted)]">
           Time to log
         </div>
-        <div className="display mt-1 text-3xl">{formatHours(elapsedHours)}</div>
-        <div className="text-sm text-[color:var(--color-muted)]">
-          {format(start, "h:mm a")} – {format(end, "h:mm a")}
+        <div className="display mt-1 text-3xl">
+          {valid ? formatHours(elapsedHours) : <span className="text-[color:var(--color-warn)]">—</span>}
         </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <label>
+            <div className="mb-1 text-xs uppercase tracking-wider text-[color:var(--color-muted)]">
+              Start
+            </div>
+            <input
+              type="time"
+              value={startStr}
+              onChange={(e) => setStartStr(e.target.value)}
+              className="w-full"
+            />
+          </label>
+          <label>
+            <div className="mb-1 text-xs uppercase tracking-wider text-[color:var(--color-muted)]">
+              End
+            </div>
+            <input
+              type="time"
+              value={endStr}
+              onChange={(e) => setEndStr(e.target.value)}
+              className="w-full"
+            />
+          </label>
+        </div>
+
+        <div className="mt-2 flex items-center justify-between text-[11px]">
+          <span className="text-[color:var(--color-muted)]">
+            Forgot to stop the timer? Set End to when you actually finished.
+          </span>
+          {adjusted && (
+            <button
+              onClick={() => {
+                setStartStr(toHHMM(initialStart));
+                setEndStr(toHHMM(initialEnd));
+              }}
+              className="text-[color:var(--color-ink-2)] underline"
+              type="button"
+            >
+              reset
+            </button>
+          )}
+        </div>
+        {!valid && (
+          <p className="mt-1 text-xs text-[color:var(--color-warn)]">
+            End must be after start.
+          </p>
+        )}
 
         <label className="mt-4 block">
           <div className="mb-1 text-sm font-medium">What did you finish?</div>
@@ -153,7 +209,11 @@ function StopModal({
           <button onClick={onDiscard} className="btn btn-ghost">
             Discard (won't be logged)
           </button>
-          <button onClick={() => onLog(notes)} className="btn btn-primary">
+          <button
+            onClick={() => onLog({ startTime: startStr, endTime: endStr, notes })}
+            disabled={!valid}
+            className="btn btn-primary disabled:opacity-50"
+          >
             Log block
           </button>
         </div>
@@ -165,6 +225,19 @@ function StopModal({
   );
 }
 
+function toHHMM(d: Date): string {
+  return `${d.getHours().toString().padStart(2, "0")}:${d
+    .getMinutes()
+    .toString()
+    .padStart(2, "0")}`;
+}
+
+function diffHours(start: string, end: string): number {
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  return (eh * 60 + em - (sh * 60 + sm)) / 60;
+}
+
 function formatElapsed(ms: number): string {
   const total = Math.floor(ms / 1000);
   const h = Math.floor(total / 3600);
@@ -173,10 +246,3 @@ function formatElapsed(ms: number): string {
   return [h, m, s].map((n) => n.toString().padStart(2, "0")).join(":");
 }
 
-function roundedTime(d: Date): string {
-  // Round to the nearest minute so the entry's start/end are clean HH:MM.
-  const minutes = d.getHours() * 60 + d.getMinutes() + Math.round(d.getSeconds() / 60);
-  const h = Math.floor(minutes / 60) % 24;
-  const m = minutes % 60;
-  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
-}
